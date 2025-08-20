@@ -3,7 +3,7 @@
 
 x-base: &base
   image: "mongo:${MONGO_VERSION}"
-  restart: no
+  restart: on-failure
   volumes:
     - /etc/localtime:/etc/localtime:ro
   logging:
@@ -260,7 +260,6 @@ services:
   mongo-express:
     <<: *base
     image: "mongo-express:${MONGO_EXPRESS_VERSION}"
-    restart: always
     ports:
       - 8081:8081
     environment:
