@@ -265,6 +265,7 @@ services:
     environment:
       ME_CONFIG_MONGODB_URL: mongodb://mongos:27017/
       ME_CONFIG_BASICAUTH_ENABLED: false
+      ME_CONFIG_BASICAUTH: false
     depends_on:
       mongos_init:
         condition: service_completed_successfully
