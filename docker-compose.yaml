@@ -20,11 +20,15 @@ x-init: &init
 x-mongo: &mongo
   <<: *base
   healthcheck:
-    test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
-    start_period: 5s
+    test:
+      [
+        "CMD-SHELL",
+        "bash -c 'echo -en \"\\x00\\x00\\x00\\x00\" > /dev/tcp/localhost/27017'",
+      ]
+    interval: 30s
+    timeout: 3s
+    retries: 3
+    start_period: 20s
 
 x-config: &config
   <<: *mongo
