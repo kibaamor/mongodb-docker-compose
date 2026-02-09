@@ -1,24 +1,17 @@
-# https://hub.docker.com/_/mongo
-# https://hub.docker.com/_/mongo-express
-
 x-base: &base
-  image: "mongo:${MONGO_VERSION}"
-  restart: on-failure
   volumes:
     - /etc/localtime:/etc/localtime:ro
   logging:
     driver: "json-file"
     options:
-      max-size: "${MAX_LOG_FILE_SIZE}"
-      max-file: "${MAX_LOG_FILE_COUNT}"
+      max-size: "${MAX_LOG_FILE_SIZE:-10m}"
+      max-file: "${MAX_LOG_FILE_COUNT:-3}"
       tag: "{{.Name}}|{{.ImageName}}|{{.ID}}"
 
-x-init: &init
+x-mongo-node: &mongo-node
   <<: *base
-  entrypoint: ["/bin/bash", "-c"]
-
-x-mongo: &mongo
-  <<: *base
+  image: "mongo:${MONGO_VERSION:-latest}"
+  restart: unless-stopped
   healthcheck:
     test:
       [
@@ -30,80 +23,58 @@ x-mongo: &mongo
     retries: 3
     start_period: 20s
 
-x-config: &config
-  <<: *mongo
-  command:
-    [
-      "mongod",
-      "--configsvr",
-      "--replSet",
-      "config",
-      "--bind_ip_all",
-      "--port",
-      "27017",
-    ]
+x-mongo-config: &mongo-config
+  <<: *mongo-node
+  command: mongod --configsvr --replSet config --bind_ip_all --port 27017
   deploy:
     resources:
       limits:
-        cpus: ${CONFIG_SVR_CPU_LIMIT}
-        memory: ${CONFIG_SVR_MEM_LIMIT}
+        cpus: "${CONFIG_SVR_CPU_LIMIT:-0.7}"
+        memory: "${CONFIG_SVR_MEM_LIMIT:-768M}"
 
-x-shard: &shard
-  <<: *mongo
+x-mongo-shard-1: &mongo-shard-1
+  <<: *mongo-node
+  command: mongod --shardsvr --replSet shard1 --bind_ip_all --port 27017
   deploy:
     resources:
       limits:
-        cpus: ${SHARD_SVR_CPU_LIMIT}
-        memory: ${SHARD_SVR_MEM_LIMIT}
+        cpus: "${SHARD_SVR_CPU_LIMIT:-1.0}"
+        memory: "${SHARD_SVR_MEM_LIMIT:-2G}"
 
-x-shard1: &shard1
-  <<: *shard
-  command:
-    [
-      "mongod",
-      "--shardsvr",
-      "--replSet",
-      "shard1",
-      "--bind_ip_all",
-      "--port",
-      "27017",
-    ]
-
-x-shard2: &shard2
-  <<: *shard
-  command:
-    [
-      "mongod",
-      "--shardsvr",
-      "--replSet",
-      "shard2",
-      "--bind_ip_all",
-      "--port",
-      "27017",
-    ]
+x-mongo-shard-2: &mongo-shard-2
+  <<: *mongo-node
+  command: mongod --shardsvr --replSet shard2 --bind_ip_all --port 27017
+  deploy:
+    resources:
+      limits:
+        cpus: "${SHARD_SVR_CPU_LIMIT:-1.0}"
+        memory: "${SHARD_SVR_MEM_LIMIT:-2G}"
 
 services:
-  config1:
-    <<: *config
+  mongo-config-1:
+    <<: *mongo-config
     volumes:
-      - config1_db:/data/db
-      - config1_configdb:/data/configdb
-  config2:
-    <<: *config
+      - mongo_config_1_db:/data/db
+      - mongo_config_1_configdb:/data/configdb
+  mongo-config-2:
+    <<: *mongo-config
     volumes:
-      - config2_db:/data/db
-      - config2_configdb:/data/configdb
-  config3:
-    <<: *config
+      - mongo_config_2_db:/data/db
+      - mongo_config_2_configdb:/data/configdb
+  mongo-config-3:
+    <<: *mongo-config
     volumes:
-      - config3_db:/data/db
-      - config3_configdb:/data/configdb
+      - mongo_config_3_db:/data/db
+      - mongo_config_3_configdb:/data/configdb
 
-  config_init:
-    <<: *init
+  mongo-config-init:
+    <<: *base
+    image: "mongo:${MONGO_VERSION:-latest}"
+    restart: on-failure
+    entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        mongosh --host config1 --eval '
+        mongosh --host mongo-config-1 --eval '
         try {
           let status = rs.status();
           print("Config replica set already initialized:", status.ok === 1);
@@ -113,37 +84,40 @@ services:
             _id: "config",
             configsvr: true,
             members: [
-              { _id: 0, host: "config1:27017" },
-              { _id: 1, host: "config2:27017" },
-              { _id: 2, host: "config3:27017" },
+              { _id: 0, host: "mongo-config-1:27017" },
+              { _id: 1, host: "mongo-config-2:27017" },
+              { _id: 2, host: "mongo-config-3:27017" },
             ],
           });
         }'
     depends_on:
-      config1:
+      mongo-config-1:
         condition: service_healthy
-      config2:
+      mongo-config-2:
         condition: service_healthy
-      config3:
+      mongo-config-3:
         condition: service_healthy
 
-  shard1a:
-    <<: *shard1
+  mongo-shard-1-a:
+    <<: *mongo-shard-1
     volumes:
-      - shard1a_db:/data/db
-  shard1b:
-    <<: *shard1
+      - mongo_shard_1_a_db:/data/db
+  mongo-shard-1-b:
+    <<: *mongo-shard-1
     volumes:
-      - shard1b_db:/data/db
-  shard1c:
-    <<: *shard1
+      - mongo_shard_1_b_db:/data/db
+  mongo-shard-1-c:
+    <<: *mongo-shard-1
     volumes:
-      - shard1c_db:/data/db
-  shard1_init:
-    <<: *init
+      - mongo_shard_1_c_db:/data/db
+  mongo-shard-1-init:
+    <<: *base
+    image: "mongo:${MONGO_VERSION:-latest}"
+    restart: on-failure
+    entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        mongosh --host shard1a --eval '
+        mongosh --host mongo-shard-1-a --eval '
         try {
           let status = rs.status();
           print("Shard1 replica set already initialized:", status.ok === 1);
@@ -152,37 +126,40 @@ services:
           rs.initiate({
             _id: "shard1",
             members: [
-              { _id: 0, host: "shard1a:27017" },
-              { _id: 1, host: "shard1b:27017" },
-              { _id: 2, host: "shard1c:27017" },
+              { _id: 0, host: "mongo-shard-1-a:27017" },
+              { _id: 1, host: "mongo-shard-1-b:27017" },
+              { _id: 2, host: "mongo-shard-1-c:27017" },
             ],
           });
         }'
     depends_on:
-      shard1a:
+      mongo-shard-1-a:
         condition: service_healthy
-      shard1b:
+      mongo-shard-1-b:
         condition: service_healthy
-      shard1c:
+      mongo-shard-1-c:
         condition: service_healthy
 
-  shard2a:
-    <<: *shard2
+  mongo-shard-2-a:
+    <<: *mongo-shard-2
     volumes:
-      - shard2a_db:/data/db
-  shard2b:
-    <<: *shard2
+      - mongo_shard_2_a_db:/data/db
+  mongo-shard-2-b:
+    <<: *mongo-shard-2
     volumes:
-      - shard2b_db:/data/db
-  shard2c:
-    <<: *shard2
+      - mongo_shard_2_b_db:/data/db
+  mongo-shard-2-c:
+    <<: *mongo-shard-2
     volumes:
-      - shard2c_db:/data/db
-  shard2_init:
-    <<: *init
+      - mongo_shard_2_c_db:/data/db
+  mongo-shard-2-init:
+    <<: *base
+    image: "mongo:${MONGO_VERSION:-latest}"
+    restart: on-failure
+    entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        mongosh --host shard2a --eval '
+        mongosh --host mongo-shard-2-a --eval '
         try {
           let status = rs.status();
           print("Shard2 replica set already initialized:", status.ok === 1);
@@ -191,45 +168,43 @@ services:
           rs.initiate({
             _id: "shard2",
             members: [
-              { _id: 0, host: "shard2a:27017" },
-              { _id: 1, host: "shard2b:27017" },
-              { _id: 2, host: "shard2c:27017" },
+              { _id: 0, host: "mongo-shard-2-a:27017" },
+              { _id: 1, host: "mongo-shard-2-b:27017" },
+              { _id: 2, host: "mongo-shard-2-c:27017" },
             ],
           });
         }'
     depends_on:
-      shard2a:
+      mongo-shard-2-a:
         condition: service_healthy
-      shard2b:
+      mongo-shard-2-b:
         condition: service_healthy
-      shard2c:
+      mongo-shard-2-c:
         condition: service_healthy
 
   mongos:
-    <<: *mongo
-    command:
-      [
-        "mongos",
-        "--configdb",
-        "config/config1:27017,config2:27017,config3:27017",
-        "--bind_ip_all",
-      ]
+    <<: *mongo-node
+    command: mongos --configdb config/mongo-config-1:27017,mongo-config-2:27017,mongo-config-3:27017 --bind_ip_all
     ports:
-      - 27017:27017
+      - "${MONGOS_PORT:-27017}:27017"
     deploy:
       resources:
         limits:
-          cpus: ${MONGOS_CPU_LIMIT}
-          memory: ${MONGOS_MEM_LIMIT}
+          cpus: "${MONGOS_CPU_LIMIT:-0.5}"
+          memory: "${MONGOS_MEM_LIMIT:-512M}"
     depends_on:
-      config_init:
+      mongo-config-init:
         condition: service_completed_successfully
-      shard1_init:
+      mongo-shard-1-init:
         condition: service_completed_successfully
-      shard2_init:
+      mongo-shard-2-init:
         condition: service_completed_successfully
-  mongos_init:
-    <<: *init
+
+  mongos-init:
+    <<: *base
+    image: "mongo:${MONGO_VERSION:-latest}"
+    restart: on-failure
+    entrypoint: ["/bin/bash", "-c"]
     command:
       - |
         mongosh --host mongos --eval '
@@ -238,11 +213,11 @@ services:
           let existingShards = shardsInfo.map(s => s._id);
 
           if (!existingShards.includes("shard1")) {
-            sh.addShard("shard1/shard1a:27017,shard1b:27017,shard1c:27017");
+            sh.addShard("shard1/mongo-shard-1-a:27017,mongo-shard-1-b:27017,mongo-shard-1-c:27017");
           } else { print("shard1 already added"); }
-          
+
           if (!existingShards.includes("shard2")) {
-            sh.addShard("shard2/shard2a:27017,shard2b:27017,shard2c:27017");
+            sh.addShard("shard2/mongo-shard-2-a:27017,mongo-shard-2-b:27017,mongo-shard-2-c:27017");
           } else { print("shard2 already added"); }
         } catch(e) { print("Error adding shards:", e); }'
 
@@ -255,7 +230,6 @@ services:
           echo
         done
     volumes:
-      - /etc/localtime:/etc/localtime:ro
       - ./init:/docker-entrypoint-initdb.d:ro
     depends_on:
       mongos:
@@ -263,27 +237,28 @@ services:
 
   mongo-express:
     <<: *base
-    image: "mongo-express:${MONGO_EXPRESS_VERSION}"
+    image: "mongo-express:${MONGO_EXPRESS_VERSION:-latest}"
+    restart: unless-stopped
     ports:
-      - 8081:8081
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
     environment:
       ME_CONFIG_MONGODB_URL: mongodb://mongos:27017/
       ME_CONFIG_BASICAUTH_ENABLED: false
       ME_CONFIG_BASICAUTH: false
     depends_on:
-      mongos_init:
+      mongos-init:
         condition: service_completed_successfully
 
 volumes:
-  config1_db:
-  config1_configdb:
-  config2_db:
-  config2_configdb:
-  config3_db:
-  config3_configdb:
-  shard1a_db:
-  shard1b_db:
-  shard1c_db:
-  shard2a_db:
-  shard2b_db:
-  shard2c_db:
+  mongo_config_1_db:
+  mongo_config_1_configdb:
+  mongo_config_2_db:
+  mongo_config_2_configdb:
+  mongo_config_3_db:
+  mongo_config_3_configdb:
+  mongo_shard_1_a_db:
+  mongo_shard_1_b_db:
+  mongo_shard_1_c_db:
+  mongo_shard_2_a_db:
+  mongo_shard_2_b_db:
+  mongo_shard_2_c_db:

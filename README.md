@@ -1,162 +1,232 @@
-# MongoDB Sharded Cluster Docker Compose
+# MongoDB Sharded Cluster with Docker Compose
 
-This repository contains a Docker Compose setup for a **MongoDB sharded cluster** with two shards, a config replica set, `mongos` router, and `mongo-express` for web-based management.
+A MongoDB sharded cluster deployment using Docker Compose, with automatic initialization and web-based administration.
 
 ## Architecture
 
-```text
-    +-----------------+
-    |     mongos      |
-    +-----------------+
-    |             |
-+----------+   +----------+
-| Shard 1  |   | Shard 2  |
-+----------+   +----------+
-| 3 replicas|   | 3 replicas|
-+----------+   +----------+
-    |             |
-+-----------------+
-| Config Replica  |
-| 3 members       |
-+-----------------+
+This setup provides a complete MongoDB sharded cluster with the following components:
+
+### Config Servers (3 nodes)
+
+- `mongo-config-1`, `mongo-config-2`, `mongo-config-3`
+- Replica set name: `config`
+- Stores cluster metadata and configuration
+
+### Shard 1 (3 nodes)
+
+- `mongo-shard-1-a`, `mongo-shard-1-b`, `mongo-shard-1-c`
+- Replica set name: `shard1`
+- Stores a subset of the data
+
+### Shard 2 (3 nodes)
+
+- `mongo-shard-2-a`, `mongo-shard-2-b`, `mongo-shard-2-c`
+- Replica set name: `shard2`
+- Stores a subset of the data
+
+### Router
+
+- `mongos` - Query router that directs client requests to appropriate shards
+- Accessible on port `27017` (configurable)
+
+### Web UI
+
+- `mongo-express` - Web-based MongoDB administration interface
+- Accessible on port `8081` (configurable)
+- No authentication required (configure for production use)
+
+## Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose 2.0+
+- At least 8GB of available RAM
+- At least 20GB of available disk space
+
+## Quick Start
+
+1. **Clone the repository** (or create the files in your directory)
+
+2. **Create environment configuration** (optional):
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Edit `.env` to customize settings if needed.
+
+3. **Start the cluster**:
+
+   ```bash
+   docker compose up -d
+   ```
+
+4. **Monitor the startup process**:
+
+   ```bash
+   docker compose logs -f
+   ```
+
+   Wait for all initialization services to complete successfully.
+
+5. **Access the cluster**:
+
+   - MongoDB connection: <mongodb://localhost:27017>
+   - Mongo Express UI: <http://localhost:8081>
+
+6. **Verify cluster status**:
+
+   ```bash
+   docker compose exec mongos mongosh --eval "sh.status()"
+   ```
+
+## Configuration
+
+All configurable options are available as environment variables. See `.env.example` for details.
+
+### Key Configuration Options
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `MONGO_VERSION` | `latest` | MongoDB Docker image version |
+| `MONGOS_PORT` | `27017` | External port for MongoDB router |
+| `MONGO_EXPRESS_PORT` | `8081` | External port for web UI |
+| `SHARD_SVR_CPU_LIMIT` | `1.0` | CPU limit per shard server |
+| `SHARD_SVR_MEM_LIMIT` | `2G` | Memory limit per shard server |
+| `CONFIG_SVR_CPU_LIMIT` | `0.7` | CPU limit per config server |
+| `CONFIG_SVR_MEM_LIMIT` | `768M` | Memory limit per config server |
+| `MONGOS_CPU_LIMIT` | `0.5` | CPU limit for mongos router |
+| `MONGOS_MEM_LIMIT` | `512M` | Memory limit for mongos router |
+
+## Custom Initialization Scripts
+
+You can add custom initialization scripts to the `init/` directory. The system will automatically execute:
+
+- `.sh` files - Bash scripts (sourced with `.`)
+
+Scripts are executed in the `mongos-init` container after shards are added to the cluster.
+
+### Example: Create a sharded collection
+
+Create `init/setup-database.sh`:
+
+```bash
+#!/bin/bash
+
+mongosh --host mongos --eval '
+  db = db.getSiblingDB("myapp");
+  sh.enableSharding("myapp");
+  db.createCollection("users");
+  sh.shardCollection("myapp.users", { "_id": "hashed" });
+  print("Database and collection created successfully");
+'
 ```
 
-### Components
+## Management
 
-- **Config servers (`config1`, `config2`, `config3`)**  
-  Store metadata for the sharded cluster. Deployed as a replica set.
+### Start the cluster
 
-- **Shards (`shard1a-c`, `shard2a-c`)**  
-  Store the actual data. Each shard is a replica set with 3 members.
+```bash
+docker compose up -d
+```
 
-- **`mongos`**  
-  Acts as the query router for the sharded cluster.
+### Stop the cluster
 
-- **`mongo-express`**  
-  Web interface to monitor the MongoDB cluster.
+```bash
+docker compose down
+```
 
-- **Init containers (`*_init`)**  
-  Initialize replica sets and add shards to the `mongos` router.
+### Stop and remove all data
 
----
+```bash
+docker compose down -v
+```
 
-## Environment Variables
+### View logs
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MONGO_VERSION` | MongoDB Docker image version | `6.0.19` |
-| `MONGO_EXPRESS_VERSION` | Mongo Express version | `latest` |
-| `CONFIG_SVR_CPU_LIMIT` | CPU limit for config servers | `0.7` |
-| `CONFIG_SVR_MEM_LIMIT` | Memory limit for config servers | `768M` |
-| `SHARD_SVR_CPU_LIMIT` | CPU limit for shard servers | `1.0` |
-| `SHARD_SVR_MEM_LIMIT` | Memory limit for shard servers | 2G` |
-| `MONGOS_CPU_LIMIT` | CPU limit for mongos | `0.5` |
-| `MONGOS_MEM_LIMIT` | Memory limit for mongos | `512M` |
-| `MAX_LOG_FILE_SIZE` | Max size for container logs | `10m` |
-| `MAX_LOG_FILE_COUNT` | Max number of log files | `3` |
+```bash
+# All services
+docker compose logs -f
 
----
+# Specific service
+docker compose logs -f mongos
+```
 
-## Services
+### Connect with mongosh
 
-### Config Servers
+```bash
+docker compose exec mongos mongosh
+```
 
-- `config1`, `config2`, `config3`  
-  - Run `mongod` with `--configsvr` and `--replSet config`.  
-  - Volumes: `/data/db` and `/data/configdb`.  
-  - `config_init` initializes the config replica set.
+### Check cluster status
 
-### Shards
+```bash
+docker compose exec mongos mongosh --eval "sh.status()"
+```
 
-- **Shard 1**: `shard1a`, `shard1b`, `shard1c`  
-  - Run `mongod` with `--shardsvr` and `--replSet shard1`.  
-  - `shard1_init` initializes the replica set.
+### Check replica set status
 
-- **Shard 2**: `shard2a`, `shard2b`, `shard2c`  
-  - Run `mongod` with `--shardsvr` and `--replSet shard2`.  
-  - `shard2_init` initializes the replica set.
+```bash
+# Config servers
+docker compose exec mongo-config-1 mongosh --eval "rs.status()"
 
-### Mongos Router
+# Shard 1
+docker compose exec mongo-shard-1-a mongosh --eval "rs.status()"
 
-- `mongos`  
-  - Routes queries to the correct shard.  
-  - Depends on all replica sets being initialized.
+# Shard 2
+docker compose exec mongo-shard-2-a mongosh --eval "rs.status()"
+```
 
-- `mongos_init`  
-  - Adds shard1 and shard2 to the mongos router.  
-  - Runs any `.sh` scripts in `./init` directory.
+## Data Persistence
 
-### Mongo Express
+Data is persisted in Docker volumes:
 
-- `mongo-express`  
-  - Web interface to manage the cluster.  
-  - Connects to `mongos`.  
-  - Port: `8081`.
+- Config servers: `mongo_config_1_db`, `mongo_config_2_db`, `mongo_config_3_db`
+- Shard 1: `mongo_shard_1_a_db`, `mongo_shard_1_b_db`, `mongo_shard_1_c_db`
+- Shard 2: `mongo_shard_2_a_db`, `mongo_shard_2_b_db`, `mongo_shard_2_c_db`
 
----
+Data persists across container restarts unless explicitly removed with `docker compose down -v`.
 
-## Volumes
+## Health Checks
 
-| Volume | Description |
-|--------|-------------|
-| `config1_db`, `config2_db`, `config3_db` | Config server data |
-| `config1_configdb`, `config2_configdb`, `config3_configdb` | Config server metadata |
-| `shard1a_db`, `shard1b_db`, `shard1c_db` | Shard1 data |
-| `shard2a_db`, `shard2b_db`, `shard2c_db` | Shard2 data |
+Each MongoDB node includes a health check that verifies the MongoDB port is accepting connections. Services that depend on others will wait for health checks to pass before starting.
 
----
+## Logging
 
-## Usage
+Logs are configured with rotation to prevent disk space issues:
 
-1. Set environment variables in a `.env` file
+- Max log file size: `10m` (configurable)
+- Max log files: `3` (configurable)
+- Tagged with container name, image, and ID
 
-    ```dotenv
-    MONGO_VERSION=6.0.19
-    MONGO_EXPRESS_VERSION=latest
+## Troubleshooting
 
-    MAX_LOG_FILE_SIZE=20m
-    MAX_LOG_FILE_COUNT=3
+### Initialization services fail
 
-    CONFIG_SVR_CPU_LIMIT='0.5'
-    CONFIG_SVR_MEM_LIMIT=1G
-    SHARD_SVR_CPU_LIMIT='1'
-    SHARD_SVR_MEM_LIMIT=1G
-    MONGOS_CPU_LIMIT='1'
-    MONGOS_MEM_LIMIT=1G
-    ```
+- Check logs: `docker compose logs mongo-config-init mongo-shard-1-init mongo-shard-2-init mongos-init`
+- Ensure all health checks pass before initialization runs
+- Restart failed services: `docker compose restart <service-name>`
 
-2. Start the cluster
+### Cannot connect to cluster
 
-    ```bash
-    docker compose up -d
-    ```
+- Verify mongos is running: `docker compose ps mongos`
+- Check mongos logs: `docker compose logs mongos`
+- Ensure initialization completed: `docker compose ps mongos-init` (should show "exited (0)")
 
-3. Access Mongo Express
+### Out of memory errors
 
-    ```bash
-    http://localhost:8081
-    ```
+- Increase Docker daemon memory allocation
+- Reduce memory limits in `.env` file
+- Consider using fewer replicas or shards
 
-4. Connect to the cluster via `mongosh`
+### Port conflicts
 
-    ```bash
-    mongosh "mongodb://localhost:27017"
-    ```
+- Change `MONGOS_PORT` or `MONGO_EXPRESS_PORT` in `.env` file
+- Check for other services using default ports
 
-5. Stop the cluster
+## License
 
-    ```bash
-    docker compose down
-    ```
+MIT License
 
-6. Cleanup the cluster
+## Contributing
 
-    ```bash
-    docker compose down -v 
-    ```
-
-## Notes
-
-- Init containers (`*_init`) are executed only once to initialize replica sets and add shards.
-- Healthchecks ensure that services start in the correct order.
-- You can add custom shell scripts to `/init` to execute on the `mongos_init` container.
+Feel free to submit issues and enhancement requests!
