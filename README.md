@@ -88,7 +88,12 @@ All configurable options are available as environment variables. See `.env.examp
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
 | `MONGO_VERSION` | `latest` | MongoDB Docker image version |
+| `MONGO_EXPRESS_VERSION` | `latest` | Mongo Express Docker image version |
+| `MAX_LOG_FILE_SIZE` | `10m` | Maximum size of a single log file before rotation |
+| `MAX_LOG_FILE_COUNT` | `3` | Maximum number of log files to keep |
+| `MONGOS_BIND_ADDRESS` | `127.0.0.1` | Bind address for MongoDB router (use `0.0.0.0` for all interfaces) |
 | `MONGOS_PORT` | `27017` | External port for MongoDB router |
+| `MONGO_EXPRESS_BIND_ADDRESS` | `127.0.0.1` | Bind address for Mongo Express (use `0.0.0.0` for all interfaces) |
 | `MONGO_EXPRESS_PORT` | `8081` | External port for web UI |
 | `SHARD_SVR_CPU_LIMIT` | `1.0` | CPU limit per shard server |
 | `SHARD_SVR_MEM_LIMIT` | `2G` | Memory limit per shard server |
@@ -96,6 +101,25 @@ All configurable options are available as environment variables. See `.env.examp
 | `CONFIG_SVR_MEM_LIMIT` | `768M` | Memory limit per config server |
 | `MONGOS_CPU_LIMIT` | `0.5` | CPU limit for mongos router |
 | `MONGOS_MEM_LIMIT` | `512M` | Memory limit for mongos router |
+
+### Security Considerations
+
+#### ⚠️ IMPORTANT: Network Exposure Warning
+
+**Do NOT set `MONGOS_BIND_ADDRESS` or `MONGO_EXPRESS_BIND_ADDRESS` to `0.0.0.0` in production environments** unless you have proper network security measures in place (firewall rules, VPN, etc.).
+
+The default configuration binds services to `127.0.0.1` (localhost only) to prevent external access. Binding to `0.0.0.0` (all network interfaces) can expose your MongoDB cluster to security vulnerabilities, including:
+
+- **MongoBleed CVE** ([SERVER-115508](https://jira.mongodb.org/browse/SERVER-115508)) - A critical vulnerability that can be exploited when MongoDB is exposed to untrusted networks
+- Unauthorized access to your database
+- Data breaches and data loss
+
+**Recommended practices:**
+
+- Keep bind addresses set to `127.0.0.1` for local development
+- Use SSH tunneling or VPN for remote access
+- If external access is required, implement proper authentication, network firewalls, and IP whitelisting
+- Never expose MongoDB or Mongo Express directly to the internet without authentication and encryption
 
 ## Custom Initialization Scripts
 

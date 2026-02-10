@@ -186,7 +186,7 @@ services:
     <<: *mongo-node
     command: mongos --configdb config/mongo-config-1:27017,mongo-config-2:27017,mongo-config-3:27017 --bind_ip_all
     ports:
-      - "${MONGOS_PORT:-27017}:27017"
+      - "${MONGOS_BIND_ADDRESS:-127.0.0.1}:${MONGOS_PORT:-27017}:27017"
     deploy:
       resources:
         limits:
@@ -240,7 +240,7 @@ services:
     image: "mongo-express:${MONGO_EXPRESS_VERSION:-latest}"
     restart: unless-stopped
     ports:
-      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+      - "${MONGO_EXPRESS_BIND_ADDRESS:-127.0.0.1}:${MONGO_EXPRESS_PORT:-8081}:8081"
     environment:
       ME_CONFIG_MONGODB_URL: mongodb://mongos:27017/
       ME_CONFIG_BASICAUTH_ENABLED: false
