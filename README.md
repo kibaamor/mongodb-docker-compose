@@ -1,256 +1,392 @@
-# MongoDB Sharded Cluster with Docker Compose
+# MongoDB with Docker Compose
 
-A MongoDB sharded cluster deployment using Docker Compose, with automatic initialization and web-based administration.
+Two MongoDB deployment modes using Docker Compose:
 
-## Architecture
+- **Cluster mode** (`docker-compose.cluster.yaml`): sharded MongoDB cluster with config servers, two replica-set shards, automatic initialization, and Mongo Express
+- **Single instance** (`docker-compose.single.yaml`): standalone MongoDB instance with Mongo Express web interface
 
-This setup provides a complete MongoDB sharded cluster with the following components:
+## Features
 
-### Config Servers (3 nodes)
-
-- `mongo-config-1`, `mongo-config-2`, `mongo-config-3`
-- Replica set name: `config`
-- Stores cluster metadata and configuration
-
-### Shard 1 (3 nodes)
-
-- `mongo-shard-1-a`, `mongo-shard-1-b`, `mongo-shard-1-c`
-- Replica set name: `shard1`
-- Stores a subset of the data
-
-### Shard 2 (3 nodes)
-
-- `mongo-shard-2-a`, `mongo-shard-2-b`, `mongo-shard-2-c`
-- Replica set name: `shard2`
-- Stores a subset of the data
-
-### Router
-
-- `mongos` - Query router that directs client requests to appropriate shards
-- Accessible on port `27017` (configurable)
-
-### Web UI
-
-- `mongo-express` - Web-based MongoDB administration interface
-- Accessible on port `8081` (configurable)
-- No authentication required (configure for production use)
-
-## Prerequisites
-
-- Docker Engine 20.10+
-- Docker Compose 2.0+
-- At least 8GB of available RAM
-- At least 20GB of available disk space
+- ✅ Sharded MongoDB cluster with config servers and two shards — cluster mode
+- ✅ Single MongoDB instance with Mongo Express — standalone mode
+- ✅ Automatic replica set and shard initialization — cluster mode
+- ✅ Optional custom initialization scripts — cluster mode
+- ✅ Mongo Express web management interface
+- ✅ Data persistence
+- ✅ Health checks
+- ✅ Resource limit configuration
+- ✅ Log rotation configuration
+- ✅ Configurable MongoDB bind addresses via `MONGO_BIND_ADDRESS` and `MONGOS_BIND_ADDRESS`
+- ✅ Configurable Mongo Express bind address via `MONGO_EXPRESS_BIND_ADDRESS`
 
 ## Quick Start
 
-1. **Clone the repository** (or create the files in your directory)
+### Prerequisites
 
-2. **Create environment configuration** (optional):
+- Docker
+- Docker Compose v2 (`docker compose`)
 
-   ```bash
-   cp .env.example .env
-   ```
+### Choose Deployment Mode
 
-   Edit `.env` to customize settings if needed.
+Use single instance mode when you want a simple local MongoDB server. Use cluster mode when you need to test sharding behavior, shard routing, and multi-node initialization.
 
-3. **Start the cluster**:
+| Need | Recommended Mode |
+| ---- | ---------------- |
+| Local development, simple database testing, or minimal resource usage | Single instance |
+| Sharding behavior, router behavior, replica sets, or cluster initialization testing | Cluster |
 
-   ```bash
-   docker compose up -d
-   ```
-
-4. **Monitor the startup process**:
-
-   ```bash
-   docker compose logs -f
-   ```
-
-   Wait for all initialization services to complete successfully.
-
-5. **Access the cluster**:
-
-   - MongoDB connection: <mongodb://localhost:27017>
-   - Mongo Express UI: <http://localhost:8081>
-
-6. **Verify cluster status**:
-
-   ```bash
-   docker compose exec mongos mongosh --eval "sh.status()"
-   ```
-
-## Configuration
-
-All configurable options are available as environment variables. See `.env.example` for details.
-
-### Key Configuration Options
-
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `MONGO_VERSION` | `latest` | MongoDB Docker image version |
-| `MONGO_EXPRESS_VERSION` | `latest` | Mongo Express Docker image version |
-| `MAX_LOG_FILE_SIZE` | `10m` | Maximum size of a single log file before rotation |
-| `MAX_LOG_FILE_COUNT` | `3` | Maximum number of log files to keep |
-| `MONGOS_BIND_ADDRESS` | `127.0.0.1` | Bind address for MongoDB router (use `0.0.0.0` for all interfaces) |
-| `MONGOS_PORT` | `27017` | External port for MongoDB router |
-| `MONGO_EXPRESS_BIND_ADDRESS` | `127.0.0.1` | Bind address for Mongo Express (use `0.0.0.0` for all interfaces) |
-| `MONGO_EXPRESS_PORT` | `8081` | External port for web UI |
-| `SHARD_SVR_CPU_LIMIT` | `1.0` | CPU limit per shard server |
-| `SHARD_SVR_MEM_LIMIT` | `2G` | Memory limit per shard server |
-| `CONFIG_SVR_CPU_LIMIT` | `0.7` | CPU limit per config server |
-| `CONFIG_SVR_MEM_LIMIT` | `768M` | Memory limit per config server |
-| `MONGOS_CPU_LIMIT` | `0.5` | CPU limit for mongos router |
-| `MONGOS_MEM_LIMIT` | `512M` | Memory limit for mongos router |
-
-### Security Considerations
-
-#### ⚠️ IMPORTANT: Network Exposure Warning
-
-**Do NOT set `MONGOS_BIND_ADDRESS` or `MONGO_EXPRESS_BIND_ADDRESS` to `0.0.0.0` in production environments** unless you have proper network security measures in place (firewall rules, VPN, etc.).
-
-The default configuration binds services to `127.0.0.1` (localhost only) to prevent external access. Binding to `0.0.0.0` (all network interfaces) can expose your MongoDB cluster to security vulnerabilities, including:
-
-- **MongoBleed CVE** ([SERVER-115508](https://jira.mongodb.org/browse/SERVER-115508)) - A critical vulnerability that can be exploited when MongoDB is exposed to untrusted networks
-- Unauthorized access to your database
-- Data breaches and data loss
-
-**Recommended practices:**
-
-- Keep bind addresses set to `127.0.0.1` for local development
-- Use SSH tunneling or VPN for remote access
-- If external access is required, implement proper authentication, network firewalls, and IP whitelisting
-- Never expose MongoDB or Mongo Express directly to the internet without authentication and encryption
-
-## Custom Initialization Scripts
-
-You can add custom initialization scripts to the `init/` directory. The system will automatically execute:
-
-- `.sh` files - Bash scripts (sourced with `.`)
-
-Scripts are executed in the `mongos-init` container after shards are added to the cluster.
-
-### Example: Create a sharded collection
-
-Create `init/setup-database.sh`:
+Select the compose file that matches your needs, then symlink it to `docker-compose.yaml` so you can use `docker compose` without `-f` flags:
 
 ```bash
-#!/bin/bash
+# For cluster mode (recommended if you need sharding)
+ln -sf docker-compose.cluster.yaml docker-compose.yaml
 
-mongosh --host mongos --eval '
-  db = db.getSiblingDB("myapp");
-  sh.enableSharding("myapp");
-  db.createCollection("users");
-  sh.shardCollection("myapp.users", { "_id": "hashed" });
-  print("Database and collection created successfully");
-'
+# For single instance mode (simpler, no clustering overhead)
+ln -sf docker-compose.single.yaml docker-compose.yaml
 ```
 
-## Management
+> Note:
+> `docker-compose.yaml` is gitignored, so each checkout can choose its own mode without changing tracked files.
 
-### Start the cluster
+### Configure
+
+Copy the environment variable file if you want to customize the defaults:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` as needed.
+
+> Tip:
+> By default, MongoDB and Mongo Express bind to `127.0.0.1`. If you change bind addresses, see [Networking](#networking) before updating connection strings or browser URLs.
+
+### Start
 
 ```bash
 docker compose up -d
 ```
 
-### Stop the cluster
+### Verify Cluster Mode
+
+```bash
+# Check shard initialization status
+docker compose logs -f mongos-init
+
+# Check cluster state through mongos
+docker compose exec mongos mongosh --eval "sh.status()"
+```
+
+> Note:
+> On first startup, the config server and shard initialization services create the replica sets after their MongoDB nodes are healthy. The `mongos-init` service adds both shards after `mongos` is healthy. If the cluster already exists, the initialization commands detect that state and skip duplicate setup. Mongo Express starts after cluster initialization succeeds.
+
+### Verify Single Instance Mode
+
+```bash
+# Check if MongoDB is running
+docker compose logs -f mongo
+
+# Ping MongoDB
+docker compose exec mongo mongosh --eval "db.runCommand({ ping: 1 })"
+```
+
+### Open Mongo Express
+
+With the default configuration, open <http://localhost:8081>.
+
+> Tip:
+> If you customize `MONGO_EXPRESS_BIND_ADDRESS` or `MONGO_EXPRESS_PORT`, open Mongo Express at the reachable host address and configured port. See [Networking](#networking) for bind address behavior.
+
+### Stop
 
 ```bash
 docker compose down
 ```
 
-### Stop and remove all data
+### Stop and Remove Data
 
 ```bash
 docker compose down -v
 ```
 
-### View logs
+## Common Commands
+
+The commands below assume the default MongoDB bind addresses and ports:
+
+- `MONGOS_BIND_ADDRESS=127.0.0.1`
+- `MONGOS_PORT=27017` for cluster mode
+- `MONGO_BIND_ADDRESS=127.0.0.1`
+- `MONGO_PORT=27017` for single instance mode
+
+> Tip:
+> If you customize those values, replace connection strings, browser URLs, and host ports with reachable MongoDB address and port values. See [Networking](#networking) for bind address behavior.
+
+### Cluster Mode
 
 ```bash
-# All services
+# Connect through mongos
+docker compose exec mongos mongosh
+
+# View cluster status
+docker compose exec mongos mongosh --eval "sh.status()"
+
+# View cluster shards
+docker compose exec mongos mongosh --eval "db.adminCommand({ listShards: 1 })"
+
+# Insert a sample document through mongos
+docker compose exec mongos mongosh --eval 'db.getSiblingDB("demo").items.insertOne({ message: "Hello MongoDB Cluster" })'
+
+# Read the sample document through mongos
+docker compose exec mongos mongosh --eval 'db.getSiblingDB("demo").items.findOne({ message: "Hello MongoDB Cluster" })'
+
+# Check a shard replica set status
+docker compose exec mongo-shard-1-a mongosh --eval "rs.status()"
+```
+
+### Single Instance Mode
+
+```bash
+# Connect to MongoDB
+docker compose exec mongo mongosh
+
+# Ping MongoDB
+docker compose exec mongo mongosh --eval "db.runCommand({ ping: 1 })"
+```
+
+### Monitoring
+
+```bash
+# View all service status
+docker compose ps
+
+# View service logs
 docker compose logs -f
 
-# Specific service
+# View specific service logs (cluster mode)
 docker compose logs -f mongos
+
+# View specific service logs (single instance mode)
+docker compose logs -f mongo
+
+# View resource usage
+docker stats
 ```
 
-### Connect with mongosh
+## Architecture
 
-```bash
-docker compose exec mongos mongosh
-```
+### Deployment Modes
 
-### Check cluster status
+| Mode | Compose File | Description |
+| ---- | ------------ | ----------- |
+| Cluster | `docker-compose.cluster.yaml` | Sharded MongoDB cluster with automatic initialization |
+| Single | `docker-compose.single.yaml` | Standalone MongoDB instance with Mongo Express |
 
-```bash
-docker compose exec mongos mongosh --eval "sh.status()"
-```
+### Cluster Mode
 
-### Check replica set status
+Cluster mode runs a sharded MongoDB deployment with config servers, two shards, a `mongos` router, initialization jobs, and Mongo Express:
 
-```bash
-# Config servers
-docker compose exec mongo-config-1 mongosh --eval "rs.status()"
+- 3 config server nodes in replica set `config`
+- 2 shard replica sets, each with 3 MongoDB nodes
+- 1 `mongos` router for client connections
+- 1 Mongo Express web interface connected to `mongodb://mongos:27017/`
 
-# Shard 1
-docker compose exec mongo-shard-1-a mongosh --eval "rs.status()"
+Default published ports:
 
-# Shard 2
-docker compose exec mongo-shard-2-a mongosh --eval "rs.status()"
-```
+| Service | Default Port | Environment Variable |
+| ------- | ------------ | -------------------- |
+| `mongos` | `27017` | `MONGOS_PORT` |
+| `mongo-express` | `8081` | `MONGO_EXPRESS_PORT` |
+
+Initialization services:
+
+- `mongo-config-init`
+- `mongo-shard-1-init`
+- `mongo-shard-2-init`
+- `mongos-init`
+
+Custom initialization scripts in `init/` are run by the `mongos-init` service after both shards are added to the cluster. Single instance mode does not run scripts from `init/`.
+
+### Single Instance Mode
+
+Single instance mode runs one MongoDB service named `mongo` on port `27017` by default. The port is configurable via `MONGO_PORT`.
+
+Mongo Express runs as `mongo-express` and connects to `mongodb://mongo:27017/`.
+
+Default published ports:
+
+| Service | Default Port | Environment Variable |
+| ------- | ------------ | -------------------- |
+| `mongo` | `27017` | `MONGO_PORT` |
+| `mongo-express` | `8081` | `MONGO_EXPRESS_PORT` |
+
+### Networking
+
+Both compose files publish container ports to the host with configurable bind addresses. The defaults bind services to `127.0.0.1`, which keeps MongoDB and Mongo Express accessible only from the local machine.
+
+`MONGO_BIND_ADDRESS` controls where the single MongoDB instance listens on the host. `MONGOS_BIND_ADDRESS` controls where the cluster `mongos` router listens on the host. `MONGO_EXPRESS_BIND_ADDRESS` controls where the Mongo Express web UI listens on the host.
+
+When a service binds to `127.0.0.1`, use `localhost` or `127.0.0.1` locally. When a service binds to a LAN address, use that reachable host address. If a service binds to `0.0.0.0`, do not use `0.0.0.0` as the client address; use `127.0.0.1` locally or the host IP remotely.
+
+## Configuration
+
+All configurations can be customized through the `.env` file. Refer to `.env.example` for the full list.
+
+### MongoDB Configuration
+
+| Environment Variable | Default Value | Scope | Description |
+| --------- | ----- | ----- | ------ |
+| `MONGO_VERSION` | `latest` | Both | MongoDB image version |
+| `MONGO_BIND_ADDRESS` | `127.0.0.1` | Single | Network interface for the single MongoDB instance |
+| `MONGO_PORT` | `27017` | Single | Port for the single MongoDB instance |
+| `MONGO_CPU_LIMIT` | `1.0` | Single | CPU limit for the single MongoDB instance |
+| `MONGO_MEM_LIMIT` | `1G` | Single | Memory limit for the single MongoDB instance |
+| `MONGOS_BIND_ADDRESS` | `127.0.0.1` | Cluster | Network interface for the `mongos` router |
+| `MONGOS_PORT` | `27017` | Cluster | Port for the `mongos` router |
+| `CONFIG_SVR_CPU_LIMIT` | `0.7` | Cluster | CPU limit for each config server |
+| `CONFIG_SVR_MEM_LIMIT` | `768M` | Cluster | Memory limit for each config server |
+| `SHARD_SVR_CPU_LIMIT` | `1.0` | Cluster | CPU limit for each shard server |
+| `SHARD_SVR_MEM_LIMIT` | `2G` | Cluster | Memory limit for each shard server |
+| `MONGOS_CPU_LIMIT` | `0.5` | Cluster | CPU limit for the `mongos` router |
+| `MONGOS_MEM_LIMIT` | `512M` | Cluster | Memory limit for the `mongos` router |
+
+### Mongo Express Configuration
+
+| Environment Variable | Default Value | Scope | Description |
+| --------- | ----- | ----- | ------ |
+| `MONGO_EXPRESS_VERSION` | `latest` | Both | Mongo Express image version |
+| `MONGO_EXPRESS_BIND_ADDRESS` | `127.0.0.1` | Both | Network interface Mongo Express binds to |
+| `MONGO_EXPRESS_PORT` | `8081` | Both | Web interface access port |
+
+### Logging Configuration
+
+| Environment Variable | Default Value | Scope | Description |
+| --------- | ----- | ----- | ------ |
+| `MAX_LOG_FILE_SIZE` | `10m` | Both | Maximum size of a single log file |
+| `MAX_LOG_FILE_COUNT` | `3` | Both | Number of log files to keep |
 
 ## Data Persistence
 
-Data is persisted in Docker volumes:
+### Cluster Mode
 
-- Config servers: `mongo_config_1_db`, `mongo_config_2_db`, `mongo_config_3_db`
-- Shard 1: `mongo_shard_1_a_db`, `mongo_shard_1_b_db`, `mongo_shard_1_c_db`
-- Shard 2: `mongo_shard_2_a_db`, `mongo_shard_2_b_db`, `mongo_shard_2_c_db`
+Cluster mode uses Docker named volumes for config server and shard data:
 
-Data persists across container restarts unless explicitly removed with `docker compose down -v`.
+- `mongo_config_1_db`
+- `mongo_config_1_configdb`
+- `mongo_config_2_db`
+- `mongo_config_2_configdb`
+- `mongo_config_3_db`
+- `mongo_config_3_configdb`
+- `mongo_shard_1_a_db`
+- `mongo_shard_1_b_db`
+- `mongo_shard_1_c_db`
+- `mongo_shard_2_a_db`
+- `mongo_shard_2_b_db`
+- `mongo_shard_2_c_db`
 
-## Health Checks
+### Single Instance Mode
 
-Each MongoDB node includes a health check that verifies the MongoDB port is accepting connections. Services that depend on others will wait for health checks to pass before starting.
+Single MongoDB instance uses one data volume:
 
-## Logging
+- `mongo_data`
 
-Logs are configured with rotation to prevent disk space issues:
+> Warning:
+> Docker named volumes are preserved across container restarts. Use `docker compose down -v` only when you want to remove the persisted data volumes.
 
-- Max log file size: `10m` (configurable)
-- Max log files: `3` (configurable)
-- Tagged with container name, image, and ID
+## Failover
+
+Cluster mode uses MongoDB replica sets for config servers and shard servers:
+
+- Each config server replica set has 3 members
+- Each shard replica set has 3 members
+- If a primary becomes unavailable, MongoDB replica set election can promote an eligible secondary
+- Health checks verify that MongoDB port `27017` is accepting connections
+
+## Production Notes
+
+These compose files are intended for local development, testing, and controlled environments.
+
+- Keep MongoDB and Mongo Express bind addresses set to `127.0.0.1` for local-only access.
+- Avoid exposing MongoDB or Mongo Express to an untrusted network without access controls.
+- If you bind MongoDB or Mongo Express to a LAN interface or `0.0.0.0`, restrict access with host firewall rules or a trusted network boundary.
+- Pin `MONGO_VERSION` and `MONGO_EXPRESS_VERSION` instead of using `latest` when you need repeatable deployments.
+- This project does not enable MongoDB authentication by default.
+- Use `docker compose down -v` only when you want to remove named volumes.
 
 ## Troubleshooting
 
-### Initialization services fail
+### Cluster Initialization Failed
 
-- Check logs: `docker compose logs mongo-config-init mongo-shard-1-init mongo-shard-2-init mongos-init`
-- Ensure all health checks pass before initialization runs
-- Restart failed services: `docker compose restart <service-name>`
+```bash
+# Check initialization logs
+docker compose logs mongo-config-init mongo-shard-1-init mongo-shard-2-init mongos-init
 
-### Cannot connect to cluster
+# Check if all services are healthy
+docker compose ps
 
-- Verify mongos is running: `docker compose ps mongos`
-- Check mongos logs: `docker compose logs mongos`
-- Ensure initialization completed: `docker compose ps mongos-init` (should show "exited (0)")
+# Restart cluster shard initialization
+docker compose restart mongos-init
+```
 
-### Out of memory errors
+### Cannot Connect to MongoDB
 
-- Increase Docker daemon memory allocation
-- Reduce memory limits in `.env` file
-- Consider using fewer replicas or shards
+```bash
+# Cluster mode: check router logs
+docker compose logs mongos
 
-### Port conflicts
+# Cluster mode: ping through mongos
+docker compose exec mongos mongosh --eval "db.runCommand({ ping: 1 })"
 
-- Change `MONGOS_PORT` or `MONGO_EXPRESS_PORT` in `.env` file
-- Check for other services using default ports
+# Single instance mode: check logs
+docker compose logs mongo
+
+# Single instance mode: ping MongoDB
+docker compose exec mongo mongosh --eval "db.runCommand({ ping: 1 })"
+```
+
+> Tip:
+> If you changed `MONGO_BIND_ADDRESS` or `MONGOS_BIND_ADDRESS`, use a reachable MongoDB address in external clients. See [Networking](#networking) for details.
+
+### Cannot Connect to Mongo Express
+
+```bash
+# Check Mongo Express status
+docker compose logs mongo-express
+
+# Check Mongo Express service
+docker compose ps mongo-express
+```
+
+> Tip:
+> If you changed `MONGO_EXPRESS_BIND_ADDRESS` or `MONGO_EXPRESS_PORT`, confirm the reachable host address and configured port. See [Networking](#networking) for details.
+
+### Node Cannot Start (Cluster Mode)
+
+```bash
+# Check router logs
+docker compose logs mongos
+
+# Check a shard node log
+docker compose logs mongo-shard-1-a
+```
+
+If resource limits are too low, edit `.env` and increase `SHARD_SVR_MEM_LIMIT`, `CONFIG_SVR_MEM_LIMIT`, `SHARD_SVR_CPU_LIMIT`, or `CONFIG_SVR_CPU_LIMIT`.
 
 ## License
 
-MIT License
+[MIT License](LICENSE)
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests!
+Issues and pull requests are welcome.
+
+Before submitting a change, verify the affected mode:
+
+```bash
+# Validate cluster compose configuration
+docker compose -f docker-compose.cluster.yaml config
+
+# Validate single instance compose configuration
+docker compose -f docker-compose.single.yaml config
+```
+
+For README changes, check that documented service names, ports, and environment variables still match the compose files and `.env.example`.
