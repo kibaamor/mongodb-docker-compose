@@ -1,6 +1,4 @@
 x-base: &base
-  volumes:
-    - /etc/localtime:/etc/localtime:ro
   logging:
     driver: "json-file"
     options:
@@ -25,7 +23,7 @@ x-mongo-node: &mongo-node
 
 x-mongo-config: &mongo-config
   <<: *mongo-node
-  command: mongod --configsvr --replSet config --bind_ip_all --port 27017
+  command: mongod --configsvr --replSet config --bind_ip_all --port 27017 --wiredTigerCacheSizeGB ${CONFIG_SVR_WT_CACHE_SIZE_GB:-0.25}
   deploy:
     resources:
       limits:
@@ -34,7 +32,7 @@ x-mongo-config: &mongo-config
 
 x-mongo-shard-1: &mongo-shard-1
   <<: *mongo-node
-  command: mongod --shardsvr --replSet shard1 --bind_ip_all --port 27017
+  command: mongod --shardsvr --replSet shard1 --bind_ip_all --port 27017 --wiredTigerCacheSizeGB ${SHARD_SVR_WT_CACHE_SIZE_GB:-1.0}
   deploy:
     resources:
       limits:
@@ -43,7 +41,7 @@ x-mongo-shard-1: &mongo-shard-1
 
 x-mongo-shard-2: &mongo-shard-2
   <<: *mongo-node
-  command: mongod --shardsvr --replSet shard2 --bind_ip_all --port 27017
+  command: mongod --shardsvr --replSet shard2 --bind_ip_all --port 27017 --wiredTigerCacheSizeGB ${SHARD_SVR_WT_CACHE_SIZE_GB:-1.0}
   deploy:
     resources:
       limits:
@@ -207,6 +205,7 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
+        set -e
         mongosh --host mongos --eval '
         try {
           let shardsInfo = sh.status().shards || [];
@@ -219,7 +218,7 @@ services:
           if (!existingShards.includes("shard2")) {
             sh.addShard("shard2/mongo-shard-2-a:27017,mongo-shard-2-b:27017,mongo-shard-2-c:27017");
           } else { print("shard2 already added"); }
-        } catch(e) { print("Error adding shards:", e); }'
+        } catch(e) { print("Error adding shards:", e); throw e; }'
 
         shopt -s nullglob
         for f in /docker-entrypoint-initdb.d/*; do
